@@ -8,7 +8,7 @@
   },
   "type": "module",
   "scripts": {
-    "start": "node main.js"
+    "start": "node --no-deprecation main.js"
   },
   "devDependencies": {
     "eslint": "^8.57.1",

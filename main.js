@@ -334,6 +334,10 @@ async function getVkUserName (senderId) {
       telegramMessageId
     })
 
+    if (!telegram.transferMessages) {
+      return
+    }
+
     try {
       await vkBot.api.messages.send(vkParams)
     } catch (error) {

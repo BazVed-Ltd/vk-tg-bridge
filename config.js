@@ -7,7 +7,8 @@ export const vk = {
 }
 export const telegram = {
   botToken: process.env.TELEGRAM_BOT_TOKEN,
-  chatId: parseInt(process.env.TELEGRAM_CHAT_ID)
+  chatId: parseInt(process.env.TELEGRAM_CHAT_ID),
+  transferMessages: Boolean(parseInt(process.env.TG_TO_VK))
 }
 export const redis = {
   host: process.env.REDIS_HOST,
