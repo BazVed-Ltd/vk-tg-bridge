@@ -3,6 +3,8 @@ import TelegramBot from 'node-telegram-bot-api'
 import Redis from 'ioredis'
 import { redis as _redis, vk, telegram } from './config.js'
 import axios from 'axios'
+import fr from 'follow-redirects'
+import { promisify } from 'util'
 
 // Initialize Redis
 const redis = new Redis({
@@ -24,6 +26,18 @@ const telegramBot = new TelegramBot(telegram.botToken, { polling: true })
 
 // Storage for pending VK messages sent from Telegram
 const pendingVkMessages = new Map()
+
+function _getFinalUrl (startUrl, callback) {
+  const request = fr.https.get(startUrl, (response) => {
+    callback(null, response.responseUrl)
+  })
+
+  request.on('error', (err) => {
+    callback(err)
+  })
+}
+
+const getFinalUrl = promisify(_getFinalUrl)
 
 // Utility function to escape HTML
 function escapeHTML (text) {
@@ -131,10 +145,10 @@ async function getVkUserName (senderId) {
 
     // Process attachments if any
     if (context.hasAttachments()) {
-      let hasPhotos = false
+      let hasRawAttachments = false
       for (const attachment of context.attachments) {
         if (attachment.type === 'photo') {
-          hasPhotos = true
+          hasRawAttachments = true
         } else if (attachment.type === 'video') {
           const ownerId = attachment.ownerId
           const videoId = attachment.id
@@ -161,10 +175,12 @@ async function getVkUserName (senderId) {
           } catch (error) {
             console.error('Error downloading video:', error)
           }
+        } else if (attachment.type === 'doc') {
+          hasRawAttachments = true
         }
       }
 
-      if (hasPhotos) {
+      if (hasRawAttachments) {
         const rawMessage = (await vkUser.api.messages.getById({ message_ids: [context.id] })).items[0]
 
         for (const attachment of rawMessage.attachments) {
@@ -182,6 +198,31 @@ async function getVkUserName (senderId) {
               photoBuffers.push(buffer)
             } catch (error) {
               console.error('Error downloading photo:', error)
+            }
+          // лапша))
+          } else if (attachment.type === 'doc') {
+            const doc = attachment.doc
+            const url = await getFinalUrl(doc.url)
+            try {
+              await telegramBot.sendAnimation(telegram.chatId, url, {
+                reply_to_message_id: replyToTelegramMessageId || undefined,
+                caption: messageText,
+                parse_mode: 'HTML'
+              })
+            } catch (e) {
+              try {
+                axios.get(url, { responseType: 'arraybuffer' }).then(async response => {
+                  const r = await telegramBot.sendAnimation(telegram.chatId, response.data, {
+                    reply_to_message_id: replyToTelegramMessageId || undefined,
+                    caption: messageText,
+                    parse_mode: 'HTML'
+                  })
+                }).catch(error => {
+                  console.error('Error downloading document:', error)
+                })
+              } catch (error) {
+                console.error('Error downloading document:', error)
+              }
             }
           }
         }
@@ -206,7 +247,7 @@ async function getVkUserName (senderId) {
         } catch (error) {
           console.error('Error sending placeholder message to Telegram:', error)
         }
-      } else {
+      } else if (context.text) {
         // No media, send message as usual
         try {
           const telegramMessage = await telegramBot.sendMessage(telegram.chatId, messageText, telegramOptions)
@@ -249,7 +290,7 @@ async function getVkUserName (senderId) {
           }
 
           // Add caption to the first media item if messageText is present
-          if (messageText.trim()) {
+          if (messageText.trim() && media.length > 0) {
             media[0].caption = messageText
             media[0].parse_mode = 'HTML'
           }
