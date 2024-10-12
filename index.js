@@ -131,21 +131,10 @@ async function getVkUserName (senderId) {
 
     // Process attachments if any
     if (context.hasAttachments()) {
+      let hasPhotos = false
       for (const attachment of context.attachments) {
         if (attachment.type === 'photo') {
-          // Get the largest photo size
-          const sizes = attachment.sizes
-          const largestSize = sizes.reduce((prev, current) => (prev.width > current.width ? prev : current))
-          const url = largestSize.url
-
-          // Download the photo into memory
-          try {
-            const response = await axios.get(url, { responseType: 'arraybuffer' })
-            const buffer = Buffer.from(response.data, 'binary')
-            photoBuffers.push(buffer)
-          } catch (error) {
-            console.error('Error downloading photo:', error)
-          }
+          hasPhotos = true
         } else if (attachment.type === 'video') {
           const ownerId = attachment.ownerId
           const videoId = attachment.id
@@ -174,6 +163,29 @@ async function getVkUserName (senderId) {
           }
         }
       }
+
+      if (hasPhotos) {
+        const rawMessage = (await vkUser.api.messages.getById({ message_ids: [context.id] })).items[0]
+
+        for (const attachment of rawMessage.attachments) {
+          if (attachment.type === 'photo') {
+          // Get the largest photo size
+            const photo = attachment.photo
+            const sizes = photo.sizes
+            const largestSize = sizes.reduce((prev, current) => (prev.width > current.width ? prev : current))
+            const url = largestSize.url
+
+            // Download the photo into memory
+            try {
+              const response = await axios.get(url, { responseType: 'arraybuffer' })
+              const buffer = Buffer.from(response.data, 'binary')
+              photoBuffers.push(buffer)
+            } catch (error) {
+              console.error('Error downloading photo:', error)
+            }
+          }
+        }
+      }
     }
 
     // Function to send media or message to Telegram with placeholder
@@ -181,9 +193,6 @@ async function getVkUserName (senderId) {
       let placeholderMessageId = null
 
       if (photoBuffers.length > 0 || videoBuffers.length > 0) {
-        // Send a placeholder media message (e.g., a loading image)
-        // For this example, we'll use a generic placeholder image URL
-        // You can replace this with any image you prefer
         const placeholderUrl = 'https://i.imgur.com/6RMhx.gif' // A loading GIF
 
         try {
