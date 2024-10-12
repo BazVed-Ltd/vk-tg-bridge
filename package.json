@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "immutable": "^4.3.7",
+    "ioredis": "^5.4.1",
+    "node-telegram-bot-api": "^0.66.0",
+    "vk-io": "^4.9.1"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "eslint-config-standard": "^17.1.0"
+  }
+}
