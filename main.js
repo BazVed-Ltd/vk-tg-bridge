@@ -2,15 +2,15 @@ import { VK } from 'vk-io'
 import TelegramBot from 'node-telegram-bot-api'
 import Redis from 'ioredis'
 import { redis as _redis, vk, telegram } from './config.js'
-import fs from 'fs'
-import path from 'path'
 import axios from 'axios'
 
+// Initialize Redis
 const redis = new Redis({
   host: _redis.host,
   port: _redis.port
 })
 
+// Initialize VK clients
 const vkUser = new VK({
   token: vk.userToken
 })
@@ -19,12 +19,48 @@ const vkBot = new VK({
   token: vk.botToken
 })
 
+// Initialize Telegram Bot with polling
 const telegramBot = new TelegramBot(telegram.botToken, { polling: true })
 
 // Storage for pending VK messages sent from Telegram
-const pendingVkMessages = new Map();
+const pendingVkMessages = new Map()
+
+// Utility function to escape HTML
+function escapeHTML (text) {
+  if (!text) return ''
+  return text.replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+// Utility function to get VK user's name with caching
+async function getVkUserName (senderId) {
+  const cacheKey = `vk_user_${senderId}`
+
+  // Try fetching from cache
+  let senderName = await redis.get(cacheKey)
+
+  if (senderName) {
+    return senderName
+  }
+
+  // If not in cache, fetch from VK
+  try {
+    const senderInfo = await vkUser.api.users.get({ user_ids: senderId.toString() })
+    senderName = senderInfo[0] ? `${senderInfo[0].first_name} ${senderInfo[0].last_name}` : 'Unknown'
+
+    // Store in Redis with TTL of 15 minutes (900 seconds)
+    await redis.set(cacheKey, senderName, 'EX', 900)
+
+    return senderName
+  } catch (error) {
+    console.error('Error fetching VK user info:', error)
+    return 'Unknown'
+  }
+}
 
 (async () => {
+  // Start polling for VK clients
   await vkUser.updates.startPolling()
   await vkBot.updates.startPolling()
 
@@ -63,18 +99,11 @@ const pendingVkMessages = new Map();
     if (context.peerId !== Number(vk.userChatId)) return
     if (context.senderId === -vk.groupId) return
 
-    // Fetch sender's information
+    // Fetch sender's information with caching
     const senderId = context.senderId
-    const senderInfo = await vkUser.api.users.get({ user_ids: senderId.toString() })
-    const senderName = senderInfo[0] ? `${senderInfo[0].first_name} ${senderInfo[0].last_name}` : 'Unknown'
+    const senderName = await getVkUserName(senderId)
 
-    // Escape HTML characters in the sender's name and message text
-    function escapeHTML (text) {
-      return text.replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-    }
-
+    // Prepare the message text with HTML formatting
     const messageText = `<b>${escapeHTML(senderName)}:</b>\n${escapeHTML(context.text || '')}`
 
     const messageId = context.conversationMessageId
@@ -96,9 +125,9 @@ const pendingVkMessages = new Map();
       telegramOptions.reply_to_message_id = replyToTelegramMessageId
     }
 
-    // Arrays to hold file paths of downloaded media
-    const photoFiles = []
-    const videoFiles = []
+    // Arrays to hold media buffers
+    const photoBuffers = []
+    const videoBuffers = []
 
     // Process attachments if any
     if (context.hasAttachments()) {
@@ -109,20 +138,11 @@ const pendingVkMessages = new Map();
           const largestSize = sizes.reduce((prev, current) => (prev.width > current.width ? prev : current))
           const url = largestSize.url
 
-          // Download the photo
+          // Download the photo into memory
           try {
-            const response = await axios.get(url, { responseType: 'stream' })
-            const filename = path.basename(url)
-            const filepath = path.join('/tmp', filename)
-            const writer = fs.createWriteStream(filepath)
-            response.data.pipe(writer)
-
-            await new Promise((resolve, reject) => {
-              writer.on('finish', resolve)
-              writer.on('error', reject)
-            })
-
-            photoFiles.push(filepath)
+            const response = await axios.get(url, { responseType: 'arraybuffer' })
+            const buffer = Buffer.from(response.data, 'binary')
+            photoBuffers.push(buffer)
           } catch (error) {
             console.error('Error downloading photo:', error)
           }
@@ -144,18 +164,9 @@ const pendingVkMessages = new Map();
               const url = files?.mp4_720 || files?.mp4_480 || files?.mp4_360 || files?.mp4_240 || files?.external
 
               if (url) {
-                const response = await axios.get(url, { responseType: 'stream' })
-                const filename = `video_${ownerId}_${videoId}.mp4`
-                const filepath = path.join('/tmp', filename)
-                const writer = fs.createWriteStream(filepath)
-                response.data.pipe(writer)
-
-                await new Promise((resolve, reject) => {
-                  writer.on('finish', resolve)
-                  writer.on('error', reject)
-                })
-
-                videoFiles.push(filepath)
+                const response = await axios.get(url, { responseType: 'arraybuffer' })
+                const buffer = Buffer.from(response.data, 'binary')
+                videoBuffers.push(buffer)
               }
             }
           } catch (error) {
@@ -165,53 +176,31 @@ const pendingVkMessages = new Map();
       }
     }
 
-    // Send media or message to Telegram
-    if (photoFiles.length === 0 && videoFiles.length === 0) {
-      // No media, send message as usual
-      telegramBot.sendMessage(telegram.chatId, messageText, telegramOptions)
-        .then(async (telegramMessage) => {
-          // Update vk_to_telegram mapping
-          const existingTelegramIdsStr = await redis.hget('vk_to_telegram', messageId)
-          const telegramMessageIds = existingTelegramIdsStr ? existingTelegramIdsStr.split(',') : []
-          telegramMessageIds.push(telegramMessage.message_id.toString())
-          await redis.hset('vk_to_telegram', messageId, telegramMessageIds.join(','))
+    // Function to send media or message to Telegram with placeholder
+    const sendToTelegramWithPlaceholder = async () => {
+      let placeholderMessageId = null
 
-          // Update telegram_to_vk mapping
-          const existingVkIdsStr = await redis.hget('telegram_to_vk', telegramMessage.message_id)
-          const vkMessageIds = existingVkIdsStr ? existingVkIdsStr.split(',') : []
-          vkMessageIds.push(messageId.toString())
-          await redis.hset('telegram_to_vk', telegramMessage.message_id, vkMessageIds.join(','))
-        })
-        .catch(console.error)
-    } else {
-      // Prepare media group for Telegram
-      const media = []
+      if (photoBuffers.length > 0 || videoBuffers.length > 0) {
+        // Send a placeholder media message (e.g., a loading image)
+        // For this example, we'll use a generic placeholder image URL
+        // You can replace this with any image you prefer
+        const placeholderUrl = 'https://i.imgur.com/6RMhx.gif' // A loading GIF
 
-      // Prepare media group for Telegram
-      for (const filepath of photoFiles) {
-        media.push({
-          type: 'photo',
-          media: fs.createReadStream(filepath) // Use fs.createReadStream for local file paths
-        })
-      }
+        try {
+          const placeholderMessage = await telegramBot.sendPhoto(telegram.chatId, placeholderUrl, {
+            caption: 'Uploading media...',
+            parse_mode: 'HTML',
+            reply_to_message_id: replyToTelegramMessageId || undefined
+          })
 
-      for (const filepath of videoFiles) {
-        media.push({
-          type: 'video',
-          media: fs.createReadStream(filepath) // Same for video files
-        })
-      }
-
-      // Add caption to the first media item if messageText is present
-      if (messageText.trim()) {
-        media[0].caption = messageText
-        media[0].parse_mode = 'HTML'
-      }
-
-      telegramBot.sendMediaGroup(telegram.chatId, media)
-        .then(async (telegramMessages) => {
-          // Use the first Telegram message to update the mappings
-          const telegramMessage = telegramMessages[0]
+          placeholderMessageId = placeholderMessage.message_id
+        } catch (error) {
+          console.error('Error sending placeholder message to Telegram:', error)
+        }
+      } else {
+        // No media, send message as usual
+        try {
+          const telegramMessage = await telegramBot.sendMessage(telegram.chatId, messageText, telegramOptions)
 
           // Update vk_to_telegram mapping
           const existingTelegramIdsStr = await redis.hget('vk_to_telegram', messageId)
@@ -224,17 +213,83 @@ const pendingVkMessages = new Map();
           const vkMessageIds = existingVkIdsStr ? existingVkIdsStr.split(',') : []
           vkMessageIds.push(messageId.toString())
           await redis.hset('telegram_to_vk', telegramMessage.message_id, vkMessageIds.join(','))
-        })
-        .catch(console.error)
-        .finally(() => {
-          // Clean up downloaded files
-          for (const filepath of photoFiles.concat(videoFiles)) {
-            fs.unlink(filepath, (err) => {
-              if (err) console.error('Failed to delete file:', filepath, err)
+        } catch (error) {
+          console.error('Error sending message to Telegram:', error)
+        }
+      }
+
+      // Proceed to upload media in the background
+      if (photoBuffers.length > 0 || videoBuffers.length > 0) {
+        try {
+          const media = []
+
+          // Add photos to media
+          for (const buffer of photoBuffers) {
+            media.push({
+              type: 'photo',
+              media: buffer
             })
           }
-        })
+
+          // Add videos to media
+          for (const buffer of videoBuffers) {
+            media.push({
+              type: 'video',
+              media: buffer
+            })
+          }
+
+          // Add caption to the first media item if messageText is present
+          if (messageText.trim()) {
+            media[0].caption = messageText
+            media[0].parse_mode = 'HTML'
+          }
+
+          // Send media group to Telegram
+          const telegramMessages = await telegramBot.sendMediaGroup(telegram.chatId, media)
+
+          // Assuming media is sent as separate messages, get the first one
+          const telegramMediaMessage = telegramMessages[0]
+
+          // Update vk_to_telegram mapping with the actual media message
+          const existingTelegramIdsStr = await redis.hget('vk_to_telegram', messageId)
+          const telegramMessageIds = existingTelegramIdsStr ? existingTelegramIdsStr.split(',') : []
+          telegramMessageIds.push(telegramMediaMessage.message_id.toString())
+          await redis.hset('vk_to_telegram', messageId, telegramMessageIds.join(','))
+
+          // Update telegram_to_vk mapping
+          const existingVkIdsStr = await redis.hget('telegram_to_vk', telegramMediaMessage.message_id)
+          const vkMessageIds = existingVkIdsStr ? existingVkIdsStr.split(',') : []
+          vkMessageIds.push(messageId.toString())
+          await redis.hset('telegram_to_vk', telegramMediaMessage.message_id, vkMessageIds.join(','))
+
+          // Delete the placeholder message
+          if (placeholderMessageId) {
+            try {
+              await telegramBot.deleteMessage(telegram.chatId, placeholderMessageId)
+            } catch (error) {
+              console.error('Error deleting placeholder message:', error)
+            }
+          }
+        } catch (error) {
+          console.error('Error sending media group to Telegram:', error)
+          // Optionally, edit the placeholder message to indicate failure
+          if (placeholderMessageId) {
+            try {
+              await telegramBot.editMessageCaption('Failed to upload media.', {
+                chat_id: telegram.chatId,
+                message_id: placeholderMessageId
+              })
+            } catch (editError) {
+              console.error('Error editing placeholder message after failure:', editError)
+            }
+          }
+        }
+      }
     }
+
+    // Send to Telegram with placeholder and handle media upload
+    sendToTelegramWithPlaceholder()
   })
 
   // Listen for messages from Telegram
@@ -279,7 +334,10 @@ const pendingVkMessages = new Map();
       telegramMessageId
     })
 
-    vkBot.api.messages.send(vkParams)
-      .catch(console.error)
+    try {
+      await vkBot.api.messages.send(vkParams)
+    } catch (error) {
+      console.error('Error sending message to VK:', error)
+    }
   })
 })()
