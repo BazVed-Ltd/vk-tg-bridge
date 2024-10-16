@@ -32,12 +32,12 @@ export default (bot) => {
     const results = []
     const splitter = new GraphemeSplitter()
     const inputLength = splitter.countGraphemes(inputString)
-    const size = Math.max(isNaN(N) ? Math.min(inputLength, 50) : Math.min(N, 50), 5)
+    const size = isNaN(N) ? inputLength : N
 
     // For each template, generate an inline query result
-    for (const [templateId, templateFunc] of Object.entries(templates)) {
+    for (const [templateId, template] of Object.entries(templates)) {
       try {
-        const svg = templateFunc(size) // Generate SVG based on the template
+        const svg = template.get(size)
         const asciiArt = await generateAsciiMatrix(svg, inputString) // Generate ASCII art
 
         // Ensure the generated ASCII art is not empty
@@ -51,7 +51,7 @@ export default (bot) => {
               parse_mode: 'MarkdownV2'
             },
             description: `Нажми, чтобы сгенерировать ASCII-арт с шаблоном ${templateId}`,
-            thumb_url: 'https://i.imgur.com/53yJTWr.png'
+            thumb_url: template.thumb
           })
         } else {
           console.error(`Сгенерированный ASCII-арт пустой для шаблона ${templateId}`)
