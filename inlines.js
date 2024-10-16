@@ -5,79 +5,64 @@ import GraphemeSplitter from 'grapheme-splitter'
 export default (bot) => {
   const handler = async (query) => {
     const userQuery = query.query.trim()
-    const me = '@' + (await bot.getMe()).username
 
-    // Если запрос пустой или слишком короткий, предложить доступные шаблоны
-    if (!userQuery || userQuery.length < 2) {
-      const results = Object.keys(templates).map((templateId, index) => ({
-        type: 'article',
-        id: String(index),
-        title: `🖼 ${templateId}`,
-        input_message_content: {
-          parse_mode: 'MarkdownV2',
-          message_text: `Используй \`${me} ${templateId} СЛОВО\``
-        },
-        description: `Сгенерировать ASCII-арт с использованием шаблона ${templateId}`
-      }))
-
-      return bot.answerInlineQuery(query.id, results, { cache_time: 0 })
+    // If the query is empty, return no results
+    if (!userQuery) {
+      return bot.answerInlineQuery(query.id, [], { cache_time: 0 })
     }
 
-    // Разделяем запрос пользователя (например, шаблон + слово + опционально N)
+    // Split user input into parameters
     const params = userQuery.split(' ')
 
-    // Если введено меньше двух параметров (например, нет слова или шаблона), не обрабатываем
-    if (params.length < 2) {
+    // Check if the last parameter is a number (optional N)
+    let N = NaN
+    const lastParam = params[params.length - 1]
+    if (!isNaN(parseInt(lastParam))) {
+      N = parseInt(params.pop())
+    }
+
+    const inputString = params.join(' ').trim()
+
+    // Ensure the input string is not empty
+    if (!inputString) {
+      console.error('Введенный текст пустой')
       return bot.answerInlineQuery(query.id, [], { cache_time: 0 })
     }
 
-    const templateId = params[0]
-    const N = params.length > 2 ? parseInt(params[params.length - 1]) : NaN
-    const k = isNaN(N) ? params.length : params.length - 1
-    const inputString = params.slice(1, k).join(' ')
-
-    // Проверяем, существует ли такой шаблон
-    if (!templates[templateId]) {
-      return bot.answerInlineQuery(query.id, [], { cache_time: 0 })
-    }
-
-    // Определяем длину строки с учетом эмодзи
+    const results = []
     const splitter = new GraphemeSplitter()
     const inputLength = splitter.countGraphemes(inputString)
-
     const size = Math.max(isNaN(N) ? Math.min(inputLength, 50) : Math.min(N, 50), 5)
 
-    // Проверяем, чтобы строка для генерации не была пустой
-    if (!inputString.trim()) {
-      console.error('Введенное слово пустое')
-      return bot.answerInlineQuery(query.id, [], { cache_time: 0 })
-    }
+    // For each template, generate an inline query result
+    for (const [templateId, templateFunc] of Object.entries(templates)) {
+      try {
+        const svg = templateFunc(size) // Generate SVG based on the template
+        const asciiArt = await generateAsciiMatrix(svg, inputString) // Generate ASCII art
 
-    try {
-      const svg = templates[templateId](size) // Генерируем SVG на основе шаблона
-      const asciiArt = await generateAsciiMatrix(svg, inputString) // Генерируем ASCII-арт
-
-      // Проверяем, что результат не пустой
-      if (!asciiArt.trim()) {
-        console.error('Сгенерированный ASCII-арт пустой')
-        return bot.answerInlineQuery(query.id, [], { cache_time: 0 })
+        // Ensure the generated ASCII art is not empty
+        if (asciiArt.trim()) {
+          results.push({
+            type: 'article',
+            id: `${templateId}_${query.id}`, // Unique ID per template and query
+            title: `${templateId}`,
+            input_message_content: {
+              message_text: `\`\`\`\n${asciiArt.replace(/[`]/g, '\\`')}\n\`\`\``,
+              parse_mode: 'MarkdownV2'
+            },
+            description: `Нажми, чтобы сгенерировать ASCII-арт с шаблоном ${templateId}`,
+            thumb_url: 'https://i.imgur.com/53yJTWr.png'
+          })
+        } else {
+          console.error(`Сгенерированный ASCII-арт пустой для шаблона ${templateId}`)
+        }
+      } catch (error) {
+        console.error(`Ошибка при генерации ASCII-арта для шаблона ${templateId}:`, error)
       }
-
-      const results = [{
-        type: 'article',
-        id: query.id, // Используем query.id для уникальности
-        title: `${templateId} с размером ${size}`,
-        input_message_content: {
-          message_text: `\`\`\`\n${asciiArt.replace(/[`]/g, '\\`')}\n\`\`\``, // Экранирование символов Markdown
-          parse_mode: 'MarkdownV2'
-        },
-        description: `Сгенерирован ${templateId} с размером ${size}`
-      }]
-
-      bot.answerInlineQuery(query.id, results)
-    } catch (error) {
-      console.error('Ошибка при генерации inline результата:', error)
     }
+
+    // Answer the inline query with the list of templates
+    return bot.answerInlineQuery(query.id, results, { cache_time: 0 })
   }
 
   return handler
