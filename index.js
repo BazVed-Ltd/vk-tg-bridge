@@ -5,6 +5,7 @@ import { redis as _redis, vk, telegram } from './config.js'
 import axios from 'axios'
 import fr from 'follow-redirects'
 import { promisify } from 'util'
+import getInlineHandler from './inlines.js'
 
 // Initialize Redis
 const redis = new Redis({
@@ -23,6 +24,7 @@ const vkBot = new VK({
 
 // Initialize Telegram Bot with polling
 const telegramBot = new TelegramBot(telegram.botToken, { polling: true })
+telegramBot.on('inline_query', getInlineHandler(telegramBot))
 
 // Storage for pending VK messages sent from Telegram
 const pendingVkMessages = new Map()
@@ -212,7 +214,7 @@ async function getVkUserName (senderId) {
             } catch (e) {
               try {
                 axios.get(url, { responseType: 'arraybuffer' }).then(async response => {
-                  const r = await telegramBot.sendAnimation(telegram.chatId, response.data, {
+                  await telegramBot.sendAnimation(telegram.chatId, response.data, {
                     reply_to_message_id: replyToTelegramMessageId || undefined,
                     caption: messageText,
                     parse_mode: 'HTML'
