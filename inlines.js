@@ -24,7 +24,6 @@ export default (bot) => {
       }
     }
 
-    console.log(params)
     const inputString = params.join(' ').trim()
 
     // Ensure the input string is not empty
