@@ -19,7 +19,7 @@ export default (bot) => {
 
     if (params.length > 1) {
       const lastParam = params[params.length - 1]
-      if (lastParam.every(c => c >= '0' && c <= '9')) {
+      if ([...lastParam].every(c => c >= '0' && c <= '9')) {
         N = parseInt(params.pop())
       }
     }
