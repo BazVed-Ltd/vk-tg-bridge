@@ -1,13 +1,6 @@
 import sharp from 'sharp'
 import { PNG } from 'pngjs'
 
-// Функция для проверки наличия эмодзи в строке
-const containsEmoji = (word) => {
-  const emojiRegex =
-    /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}]/u
-  return emojiRegex.test(word)
-}
-
 // Функция для парсинга PNG и создания матриц
 const parsePNG = (pngBuffer, spaceChar) => {
   const png = PNG.sync.read(pngBuffer)
@@ -94,17 +87,11 @@ const generateAsciiMatrix = async (svg, word, getNeighbors, startPoints, spacer)
     // Преобразуем слово в массив символов, учитывая эмодзи
     const characters = Array.from(word)
 
-    // Проверяем, содержит ли слово эмодзи
-    const hasEmoji = containsEmoji(word)
-
-    // Выбираем символ для пробелов
-    const spaceChar = hasEmoji ? '⬜' : ' '
-
     // Рендерим SVG в PNG
     const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer()
 
     // Парсим PNG и создаем матрицы
-    const { black, visited, result, width, height } = parsePNG(pngBuffer, spaceChar)
+    const { black, visited, result, width, height } = parsePNG(pngBuffer, ' ')
 
     let wordIndex = 0
     if (startPoints) {

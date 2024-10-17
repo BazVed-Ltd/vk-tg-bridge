@@ -1,3 +1,5 @@
+import GraphemeSplitter from 'grapheme-splitter'
+
 class Template {
   /**
    * @type {string | null}
@@ -72,14 +74,26 @@ const templates = {
     prepareWord (word) {
       const maxLength = 25
       const minLength = 3
+      const splitter = new GraphemeSplitter()
 
-      while (word.length < minLength) {
-        word += word
+      // Разделяем строку на отдельные графемы
+      let graphemes = splitter.splitGraphemes(word)
+
+      while (graphemes.length < minLength) {
+        graphemes = graphemes.concat(splitter.splitGraphemes(word))
       }
-      const trimmedWord = word.slice(0, maxLength)
-      const pal = (w) => w.split('').reverse().join('').slice(0, -1) + w
-      const result = pal(trimmedWord)
-      return result
+
+      // Обрезаем слово по максимальной длине
+      const trimmedWord = graphemes.slice(0, maxLength).join('')
+
+      // Функция для создания палиндрома
+      const pal = (w) => {
+        const graphemes = splitter.splitGraphemes(w)
+        return [...graphemes].reverse().slice(0, -1).join('') + w
+      }
+
+      // Возвращаем результат
+      return pal(trimmedWord)
     }
   })(),
   algiz: new (class extends Template {
