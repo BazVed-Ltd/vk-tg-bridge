@@ -52,7 +52,7 @@ const findNextStartingPoint = (black, visited, width, height) => {
 }
 
 // Функция для выполнения flood fill
-const floodFill = (startX, startY, wordIndex, black, visited, result, characters, width, height) => {
+const floodFill = (startX, startY, wordIndex, black, visited, result, characters, width, height, getNeighbors) => {
   const stack = []
   stack.push({ x: startX, y: startY, wordIndex })
 
@@ -78,16 +78,7 @@ const floodFill = (startX, startY, wordIndex, black, visited, result, characters
     const nextWordIndex = wordIndex + 1
 
     // Приоритет нижних диагональных точек
-    const neighbors = [
-      { x, y: y + 1 }, // Нижний
-      { x: x + 1, y: y + 1 }, // Нижний правый
-      { x: x - 1, y: y + 1 }, // Нижний левый
-      { x: x + 1, y }, // Правый
-      { x: x - 1, y }, // Левый
-      { x, y: y - 1 }, // Верхний
-      { x: x + 1, y: y - 1 }, // Верхний правый
-      { x: x - 1, y: y - 1 } // Верхний левый
-    ]
+    const neighbors = getNeighbors(x, y)
 
     for (const neighbor of neighbors) {
       stack.push({ x: neighbor.x, y: neighbor.y, wordIndex: nextWordIndex })
@@ -98,7 +89,7 @@ const floodFill = (startX, startY, wordIndex, black, visited, result, characters
 }
 
 // Основная функция для генерации ASCII матрицы
-const generateAsciiMatrix = async (svg, word) => {
+const generateAsciiMatrix = async (svg, word, getNeighbors, startPoints) => {
   try {
     // Преобразуем слово в массив символов, учитывая эмодзи
     const characters = Array.from(word)
@@ -116,28 +107,40 @@ const generateAsciiMatrix = async (svg, word) => {
     const { black, visited, result, width, height } = parsePNG(pngBuffer, spaceChar)
 
     let wordIndex = 0
-    let startPoint = findNextStartingPoint(black, visited, width, height)
+    if (startPoints) {
+      for (const p of startPoints) {
+        wordIndex = floodFill(
+          p[0],
+          p[1],
+          wordIndex,
+          black,
+          visited,
+          result,
+          characters,
+          width,
+          height,
+          getNeighbors
+        )
+      }
+    } else {
+      let startPoint = findNextStartingPoint(black, visited, width, height)
+      while (startPoint) {
+        wordIndex = floodFill(
+          startPoint.x,
+          startPoint.y,
+          wordIndex,
+          black,
+          visited,
+          result,
+          characters,
+          width,
+          height,
+          getNeighbors
+        )
 
-    if (!startPoint) {
-      throw new Error('Не найдено черных пикселей для заполнения.')
-    }
-
-    // Пока есть стартовые точки, выполняем flood fill
-    while (startPoint) {
-      wordIndex = floodFill(
-        startPoint.x,
-        startPoint.y,
-        wordIndex,
-        black,
-        visited,
-        result,
-        characters,
-        width,
-        height
-      )
-
-      // Ищем следующую стартовую точку
-      startPoint = findNextStartingPoint(black, visited, width, height)
+        // Ищем следующую стартовую точку
+        startPoint = findNextStartingPoint(black, visited, width, height)
+      }
     }
 
     // Преобразуем матрицу в строки

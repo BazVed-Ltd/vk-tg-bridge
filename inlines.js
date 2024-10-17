@@ -31,14 +31,16 @@ export default (bot) => {
 
     const results = []
     const splitter = new GraphemeSplitter()
-    const inputLength = splitter.countGraphemes(inputString)
-    const size = isNaN(N) ? inputLength : N
 
     // For each template, generate an inline query result
     for (const [templateId, template] of Object.entries(templates)) {
       try {
+        const word = template.prepareWord(inputString)
+        const wordLength = splitter.countGraphemes(word)
+        const size = isNaN(N) ? wordLength : N
         const svg = template.get(size)
-        const asciiArt = await generateAsciiMatrix(svg, inputString) // Generate ASCII art
+        console.log(word)
+        const asciiArt = await generateAsciiMatrix(svg, word, template.getNeighbors, template.getStartPoints(size)) // Generate ASCII art
 
         // Ensure the generated ASCII art is not empty
         if (asciiArt.trim()) {
