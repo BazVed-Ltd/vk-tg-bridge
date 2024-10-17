@@ -89,7 +89,7 @@ const floodFill = (startX, startY, wordIndex, black, visited, result, characters
 }
 
 // Основная функция для генерации ASCII матрицы
-const generateAsciiMatrix = async (svg, word, getNeighbors, startPoints) => {
+const generateAsciiMatrix = async (svg, word, getNeighbors, startPoints, spacer) => {
   try {
     // Преобразуем слово в массив символов, учитывая эмодзи
     const characters = Array.from(word)
@@ -144,7 +144,7 @@ const generateAsciiMatrix = async (svg, word, getNeighbors, startPoints) => {
     }
 
     // Преобразуем матрицу в строки
-    const asciiArt = result.map((row) => row.join('')).join('\n')
+    const asciiArt = result.map((row) => row.join(spacer)).join('\n')
     return asciiArt
   } catch (error) {
     console.error('Ошибка:', error)

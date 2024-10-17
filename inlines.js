@@ -39,8 +39,7 @@ export default (bot) => {
         const wordLength = splitter.countGraphemes(word)
         const size = isNaN(N) ? wordLength : N
         const svg = template.get(size)
-        console.log(word)
-        const asciiArt = await generateAsciiMatrix(svg, word, template.getNeighbors, template.getStartPoints(size)) // Generate ASCII art
+        const asciiArt = await generateAsciiMatrix(svg, word, template.getNeighbors, template.getStartPoints(size), template.spacer) // Generate ASCII art
 
         // Ensure the generated ASCII art is not empty
         if (asciiArt.trim()) {

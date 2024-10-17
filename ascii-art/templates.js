@@ -5,6 +5,11 @@ class Template {
   thumb = null
 
   /**
+   * @type {string}
+   */
+  spacer = ''
+
+  /**
    * @param {number} x
    * @param {number} y
    * @returns {Array.<{x: number, y: number}>}
@@ -46,6 +51,7 @@ class Template {
 const templates = {
   swaston: new (class extends Template {
     thumb = 'https://i.imgur.com/53yJTWr.png'
+    spacer = ' '
 
     get (N) {
       N = Math.max(N, 5)
