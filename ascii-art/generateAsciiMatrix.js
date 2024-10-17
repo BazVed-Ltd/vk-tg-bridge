@@ -1,7 +1,8 @@
 import sharp from 'sharp'
 import { PNG } from 'pngjs'
+import stringWidth from 'string-width'
 
-// Функция для парсинга PNG и создания матриц
+// Function to parse PNG and create matrices
 const parsePNG = (pngBuffer, spaceChar) => {
   const png = PNG.sync.read(pngBuffer)
   const black = []
@@ -32,7 +33,7 @@ const parsePNG = (pngBuffer, spaceChar) => {
   return { black, visited, result, width: png.width, height: png.height }
 }
 
-// Функция для нахождения следующей стартовой точки
+// Function to find the next starting point
 const findNextStartingPoint = (black, visited, width, height) => {
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -44,7 +45,7 @@ const findNextStartingPoint = (black, visited, width, height) => {
   return null
 }
 
-// Функция для выполнения flood fill
+// Function to perform flood fill
 const floodFill = (startX, startY, wordIndex, black, visited, result, characters, width, height, getNeighbors) => {
   const stack = []
   stack.push({ x: startX, y: startY, wordIndex })
@@ -52,25 +53,25 @@ const floodFill = (startX, startY, wordIndex, black, visited, result, characters
   while (stack.length > 0) {
     const { x, y, wordIndex } = stack.pop()
 
-    // Проверка границ
+    // Boundary check
     if (x < 0 || x >= width || y < 0 || y >= height) {
       continue
     }
 
-    // Пропускаем, если уже посещено или не черный пиксель
+    // Skip if already visited or not a black pixel
     if (visited[y][x] || !black[y][x]) {
       continue
     }
 
-    // Отмечаем как посещенный
+    // Mark as visited
     visited[y][x] = true
 
-    // Записываем соответствующий символ
+    // Assign the corresponding character
     result[y][x] = characters[wordIndex % characters.length]
 
     const nextWordIndex = wordIndex + 1
 
-    // Приоритет нижних диагональных точек
+    // Prioritize lower diagonal points
     const neighbors = getNeighbors(x, y)
 
     for (const neighbor of neighbors) {
@@ -81,16 +82,16 @@ const floodFill = (startX, startY, wordIndex, black, visited, result, characters
   return wordIndex
 }
 
-// Основная функция для генерации ASCII матрицы
+// Main function to generate ASCII matrix
 const generateAsciiMatrix = async (svg, word, getNeighbors, startPoints, spacer) => {
   try {
-    // Преобразуем слово в массив символов, учитывая эмодзи
+    // Convert the word into an array of characters, accounting for emojis
     const characters = Array.from(word)
 
-    // Рендерим SVG в PNG
+    // Render SVG to PNG
     const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer()
 
-    // Парсим PNG и создаем матрицы
+    // Parse PNG and create matrices
     const { black, visited, result, width, height } = parsePNG(pngBuffer, ' ')
 
     let wordIndex = 0
@@ -125,16 +126,44 @@ const generateAsciiMatrix = async (svg, word, getNeighbors, startPoints, spacer)
           getNeighbors
         )
 
-        // Ищем следующую стартовую точку
+        // Find the next starting point
         startPoint = findNextStartingPoint(black, visited, width, height)
       }
     }
 
-    // Преобразуем матрицу в строки
-    const asciiArt = result.map((row) => row.join(spacer)).join('\n')
+    // Determine the maximum character width
+    const characterWidths = characters.map((char) => stringWidth(char))
+    const maxWidth = Math.max(...characterWidths)
+    const baseWidth = maxWidth % 2 === 0 ? maxWidth : maxWidth + 1
+
+    // Process the result matrix to adjust characters and spaces
+    const adjustedResult = []
+    for (const row of result) {
+      const adjustedRow = []
+      for (const cell of row) {
+        if (cell === ' ') {
+          // Empty cell, output ' ' repeated baseWidth times
+          adjustedRow.push(' '.repeat(baseWidth))
+        } else {
+          // Get the character
+          const char = cell
+          const charWidth = stringWidth(char)
+          // Calculate padding
+          const totalPadding = baseWidth - charWidth
+          const paddingLeft = Math.floor(totalPadding / 2)
+          const paddingRight = totalPadding - paddingLeft
+          const adjustedChar = ' '.repeat(paddingLeft) + char + ' '.repeat(paddingRight)
+          adjustedRow.push(adjustedChar)
+        }
+      }
+      adjustedResult.push(adjustedRow.join(''))
+    }
+
+    // Assemble the ASCII art
+    const asciiArt = adjustedResult.join('\n')
     return asciiArt
   } catch (error) {
-    console.error('Ошибка:', error)
+    console.error('Error:', error)
     throw error
   }
 }
