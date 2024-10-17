@@ -16,11 +16,15 @@ export default (bot) => {
 
     // Check if the last parameter is a number (optional N)
     let N = NaN
-    const lastParam = params[params.length - 1]
-    if (!isNaN(parseInt(lastParam))) {
-      N = parseInt(params.pop())
+
+    if (params.length > 1) {
+      const lastParam = params[params.length - 1]
+      if (Number.isInteger(lastParam)) {
+        N = parseInt(params.pop())
+      }
     }
 
+    console.log(params)
     const inputString = params.join(' ').trim()
 
     // Ensure the input string is not empty
