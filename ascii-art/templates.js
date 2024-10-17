@@ -73,27 +73,23 @@ const templates = {
     }
 
     prepareWord (word) {
-      const maxLength = 25
+      const maxLength = 20
       const minLength = 3
       const splitter = new GraphemeSplitter()
 
-      // Разделяем строку на отдельные графемы
       let graphemes = splitter.splitGraphemes(word)
 
       while (graphemes.length < minLength) {
         graphemes = graphemes.concat(splitter.splitGraphemes(word))
       }
 
-      // Обрезаем слово по максимальной длине
       const trimmedWord = graphemes.slice(0, maxLength).join('')
 
-      // Функция для создания палиндрома
       const pal = (w) => {
         const graphemes = splitter.splitGraphemes(w)
         return [...graphemes].reverse().slice(0, -1).join('') + w
       }
 
-      // Возвращаем результат
       return pal(trimmedWord)
     }
   })(),
@@ -122,8 +118,10 @@ const templates = {
     }
 
     prepareWord (word) {
-      const maxLength = 50
-      const trimmedWord = word.slice(0, maxLength)
+      const maxLength = 40
+      const splitter = new GraphemeSplitter()
+      const graphemes = splitter.splitGraphemes(word)
+      const trimmedWord = graphemes.slice(0, maxLength).join('')
       return trimmedWord
     }
   })()
