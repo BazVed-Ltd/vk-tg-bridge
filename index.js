@@ -1,17 +1,14 @@
 import { VK } from 'vk-io'
 import TelegramBot from 'node-telegram-bot-api'
-import Redis from 'ioredis'
-import { redis as _redis, vk, telegram } from './config.js'
+import { vk, telegram } from './config.js'
 import axios from 'axios'
 import fr from 'follow-redirects'
 import { promisify } from 'util'
 import getInlineHandler from './inlines.js'
+import setupStickerBan from './sticker_ban.js'
+import getRedis from './redis.js'
 
-// Initialize Redis
-const redis = new Redis({
-  host: _redis.host,
-  port: _redis.port
-})
+const redis = getRedis('main')
 
 // Initialize VK clients
 const vkUser = new VK({
@@ -25,6 +22,7 @@ const vkBot = new VK({
 // Initialize Telegram Bot with polling
 const telegramBot = new TelegramBot(telegram.botToken, { polling: true })
 telegramBot.on('inline_query', getInlineHandler(telegramBot))
+setupStickerBan(telegramBot)
 
 // Storage for pending VK messages sent from Telegram
 const pendingVkMessages = new Map()
