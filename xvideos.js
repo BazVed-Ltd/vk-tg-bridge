@@ -49,12 +49,9 @@ export default async function setupXVideosDownload (telegramBot) {
     if (!links || links.length === 0) return
 
     for (const link of links) {
-      // Download the video using yt-dlp-wrap
       try {
-        // Get the cookie value from Redis, if any
         const cookieValue = await redis.get('x_cookies')
 
-        // Prepare yt-dlp options
         const ytDlpOptions = [
           link,
           '-f',
@@ -62,26 +59,31 @@ export default async function setupXVideosDownload (telegramBot) {
           '--no-playlist'
         ]
 
-        // If we have process.env.X_PROXY, add proxy options
         if (process.env.X_PROXY) {
           ytDlpOptions.push('--proxy', process.env.X_PROXY)
         }
 
         let cookieFilePath
         if (cookieValue) {
-          // Create a temporary file to store the cookies
           const tmpFile = await tmpName({ prefix: 'yt-dlp-cookies-', postfix: '.txt' })
           await fs.writeFile(tmpFile, cookieValue)
           cookieFilePath = tmpFile
           ytDlpOptions.push('--cookies', cookieFilePath)
         }
 
-        const videoBuffer = await ytDlpWrap.execBuffer(ytDlpOptions)
+        // Use execStream instead of execBuffer
+        const videoStream = ytDlpWrap.execStream(ytDlpOptions)
+
+        // Collect the streamed data into a buffer
+        const chunks = []
+        for await (const chunk of videoStream) {
+          chunks.push(chunk)
+        }
+        const videoBuffer = Buffer.concat(chunks)
 
         // Send the video back as a reply
         await telegramBot.sendVideo(chatId, videoBuffer, { reply_to_message_id: msg.message_id })
 
-        // Clean up temporary cookie file if needed
         if (cookieFilePath) {
           await fs.unlink(cookieFilePath)
         }
