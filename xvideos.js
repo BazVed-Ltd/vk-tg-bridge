@@ -1,8 +1,7 @@
 import getRedis from './redis.js'
 import { tmpName } from 'tmp-promise'
 import fs from 'fs/promises'
-import ytDlpPkg from 'yt-dlp-wrap'
-const { YTDlpWrap } = ytDlpPkg
+import YTDlpWrap from 'yt-dlp-wrap'
 
 const redis = getRedis('x')
 
