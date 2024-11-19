@@ -3,8 +3,9 @@ import Redis from 'ioredis'
 
 export default function getRedis (dbName) {
   const dbMap = {
-    'main': 0,
-    'sticker_ban': 1
+    main: 0,
+    sticker_ban: 1,
+    x: 2
   }
   const dbId = dbMap[dbName]
   if (dbId === undefined) {
