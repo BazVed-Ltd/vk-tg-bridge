@@ -14,6 +14,11 @@ services:
     restart: always
     volumes:
       - xcom:/usr/src/app/xcom
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    extra_hosts:
+    - "host.docker.internal:host-gateway"
 
   redis:
     image: redis:alpine
