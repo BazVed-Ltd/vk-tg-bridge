@@ -6,6 +6,32 @@ const YTDlpWrap = ytDlpPkg.default
 
 const redis = getRedis('x')
 
+function cookieStringToNetscapeFormat (cookieString, domain) {
+  const lines = []
+  const cookies = cookieString.split('; ')
+  for (const cookie of cookies) {
+    const [name, ...valueParts] = cookie.split('=')
+    const value = valueParts.join('=')
+    // Fields: domain, include_subdomains, path, secure, expiration, name, value
+    const domainField = domain.startsWith('.') ? domain : '.' + domain
+    const includeSubdomains = 'TRUE'
+    const path = '/'
+    const secure = 'FALSE' // Set to 'TRUE' if the site requires HTTPS
+    const expiration = Math.floor(new Date('2030-12-31').getTime() / 1000) // Arbitrary future date
+    const line = [
+      domainField,
+      includeSubdomains,
+      path,
+      secure,
+      expiration,
+      name.trim(),
+      value.trim()
+    ].join('\t')
+    lines.push(line)
+  }
+  return lines.join('\n')
+}
+
 export default async function setupXVideosDownload (telegramBot) {
   const ytDlpBinaryPath = './yt-dlp'
 
@@ -66,7 +92,10 @@ export default async function setupXVideosDownload (telegramBot) {
         let cookieFilePath
         if (cookieValue) {
           const tmpFile = await tmpName({ prefix: 'yt-dlp-cookies-', postfix: '.txt' })
-          await fs.writeFile(tmpFile, cookieValue)
+
+          // Convert the cookie string to Netscape format
+          const netscapeCookieString = cookieStringToNetscapeFormat(cookieValue, 'x.com')
+          await fs.writeFile(tmpFile, netscapeCookieString)
           cookieFilePath = tmpFile
           ytDlpOptions.push('--cookies', cookieFilePath)
         }
