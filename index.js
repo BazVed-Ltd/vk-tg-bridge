@@ -6,6 +6,7 @@ import fr from 'follow-redirects'
 import { promisify } from 'util'
 import getInlineHandler from './inlines.js'
 import setupStickerBan from './sticker_ban.js'
+import setupXVideosDownload from './xvideos.js'
 import getRedis from './redis.js'
 
 const redis = getRedis('main')
@@ -23,6 +24,7 @@ const vkBot = new VK({
 const telegramBot = new TelegramBot(telegram.botToken, { polling: true })
 telegramBot.on('inline_query', getInlineHandler(telegramBot))
 setupStickerBan(telegramBot)
+setupXVideosDownload(telegramBot)
 
 // Storage for pending VK messages sent from Telegram
 const pendingVkMessages = new Map()
