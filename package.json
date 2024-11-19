@@ -9,7 +9,6 @@
     "pngjs": "^7.0.0",
     "sharp": "^0.33.5",
     "string-width": "^7.2.0",
-    "tmp-promise": "^3.0.3",
     "vk-io": "^4.9.1",
     "yt-dlp-wrap": "^2.3.12"
   },

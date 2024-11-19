@@ -12,6 +12,8 @@ services:
     depends_on:
       - redis
     restart: always
+    volumes:
+      - xcom:/usr/src/app/xcom
 
   redis:
     image: redis:alpine
@@ -21,3 +23,4 @@ services:
 
 volumes:
   redis-data:
+  xcom:
