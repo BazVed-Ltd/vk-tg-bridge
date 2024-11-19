@@ -1,7 +1,8 @@
 import getRedis from './redis.js'
 import { tmpName } from 'tmp-promise'
 import fs from 'fs/promises'
-import YTDlpWrap from 'yt-dlp-wrap'
+import ytDlpPkg from 'yt-dlp-wrap'
+const YTDlpWrap = ytDlpPkg.default
 
 const redis = getRedis('x')
 
@@ -15,7 +16,7 @@ export default async function setupXVideosDownload (telegramBot) {
       // yt-dlp exists
     } catch (err) {
       // yt-dlp does not exist, download it
-      await YTDlpWrap.downloadFromGithub(ytDlpBinaryPath)
+      await YTDlpWrap.downloadFromGithub()
     }
   }
 
