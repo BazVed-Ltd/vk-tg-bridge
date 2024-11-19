@@ -1,5 +1,6 @@
 import fs from 'fs/promises'
 import ytDlpPkg from 'yt-dlp-wrap'
+import { tmpName } from 'tmp-promise'
 
 const YTDlpWrap = ytDlpPkg.default
 
@@ -10,9 +11,7 @@ export default async function setupXVideosDownload (telegramBot) {
   async function ensureYtDlpDownloaded () {
     try {
       await fs.access(ytDlpBinaryPath)
-      // yt-dlp exists
     } catch (err) {
-      // yt-dlp does not exist, download it
       await YTDlpWrap.downloadFromGithub()
     }
   }
@@ -33,7 +32,7 @@ export default async function setupXVideosDownload (telegramBot) {
         const fileLink = await telegramBot.getFileLink(fileId)
         const response = await fetch(fileLink)
         const data = await response.arrayBuffer()
-        await fs.writeFile('xcom/cookies.txt', Buffer.from(data))
+        await fs.writeFile('cookies.txt', Buffer.from(data))
         await telegramBot.sendMessage(adminChatId, 'Cookies saved successfully.')
       } catch (error) {
         console.error('Error saving cookies:', error)
@@ -64,34 +63,54 @@ export default async function setupXVideosDownload (telegramBot) {
           '--no-playlist'
         ]
 
-        // If we have process.env.X_PROXY, add proxy options
         if (process.env.X_PROXY) {
           ytDlpOptions.push('--proxy', process.env.X_PROXY)
         }
 
-        // Check if cookies.txt exists
         try {
           await fs.access('cookies.txt')
-          ytDlpOptions.push('--cookies', 'xcom/cookies.txt')
+          ytDlpOptions.push('--cookies', 'cookies.txt')
         } catch (err) {
           // cookies.txt does not exist; proceed without it
         }
 
-        // Use execStream to download the video
-        const videoStream = ytDlpWrap.execStream(ytDlpOptions)
+        // Generate a temporary file path for the output
+        const tempFilePath = await tmpName({ prefix: 'video-', postfix: '.mp4' })
+        ytDlpOptions.push('-o', tempFilePath)
 
-        // Collect the streamed data into a buffer
-        const chunks = []
-        for await (const chunk of videoStream) {
-          chunks.push(chunk)
-        }
-        const videoBuffer = Buffer.concat(chunks)
+        const ytDlpEmitter = ytDlpWrap.exec(ytDlpOptions)
 
-        // Send the video back as a reply
-        await telegramBot.sendVideo(chatId, videoBuffer, { reply_to_message_id: msg.message_id })
+        ytDlpEmitter
+          .on('progress', (progress) => {
+            console.log(
+              `Progress: ${progress.percent}%`,
+              `Total Size: ${progress.totalSize}`,
+              `Speed: ${progress.currentSpeed}`,
+              `ETA: ${progress.eta}`
+            )
+          })
+          .on('ytDlpEvent', (eventType, eventData) => {
+            console.log('yt-dlp event:', eventType, eventData)
+          })
+          .on('error', (error) => {
+            console.error('yt-dlp error:', error)
+            telegramBot.sendMessage(chatId, 'Error downloading video.', { reply_to_message_id: msg.message_id })
+          })
+          .on('close', async () => {
+            console.log('Download completed:', tempFilePath)
+            try {
+              // Send the video file
+              await telegramBot.sendVideo(chatId, tempFilePath, { reply_to_message_id: msg.message_id })
+              // Delete the temporary file
+              await fs.unlink(tempFilePath)
+            } catch (err) {
+              console.error('Error sending video:', err)
+              await telegramBot.sendMessage(chatId, 'Error sending video.', { reply_to_message_id: msg.message_id })
+            }
+          })
       } catch (error) {
-        console.error('Error downloading video:', error)
-        await telegramBot.sendMessage(chatId, 'Не удалось скачать видео.', { reply_to_message_id: msg.message_id })
+        console.error('Error initializing video download:', error)
+        await telegramBot.sendMessage(chatId, 'Failed to initialize video download.', { reply_to_message_id: msg.message_id })
       }
     }
   })
