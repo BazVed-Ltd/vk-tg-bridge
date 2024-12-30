@@ -6,10 +6,7 @@ export default function setupUnpinChannelMessages (bot) {
         // Проверяем, что sender_chat совпадает
         if (String(msg.sender_chat?.id) === String(process.env.TELEGRAM_CHANNEL_SENDER_CHAT_ID)) {
           try {
-            await bot.unpinChatMessage(
-              msg.message_id,
-              msg.chat.id
-            )
+            await bot.unpinChatMessage(msg.chat.id, { message_id: msg.message_id })
             console.log('Открепили сообщение из канала', msg.message_id)
           } catch (error) {
             console.error('Не удалось открепить сообщение:', error)
