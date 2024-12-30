@@ -8,6 +8,7 @@ import getInlineHandler from './inlines.js'
 import setupStickerBan from './sticker_ban.js'
 import setupXVideosDownload from './xvideos.js'
 import getRedis from './redis.js'
+import setupUnpinChannelMessages from './unpinChannelMessages.js'
 
 const redis = getRedis('main')
 
@@ -25,6 +26,7 @@ const telegramBot = new TelegramBot(telegram.botToken, { polling: true })
 telegramBot.on('inline_query', getInlineHandler(telegramBot))
 setupStickerBan(telegramBot)
 setupXVideosDownload(telegramBot)
+setupUnpinChannelMessages(telegramBot)
 
 // Storage for pending VK messages sent from Telegram
 const pendingVkMessages = new Map()
