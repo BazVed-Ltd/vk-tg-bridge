@@ -7,6 +7,7 @@ import { promisify } from 'util'
 import getInlineHandler from './inlines.js'
 import setupStickerBan from './sticker_ban.js'
 import setupXVideosDownload from './xvideos.js'
+import setupYouTubeDownload from './youtube.js'
 import getRedis from './redis.js'
 import setupUnpinChannelMessages from './unpinChannelMessages.js'
 
@@ -23,10 +24,14 @@ const vkBot = new VK({
 
 // Initialize Telegram Bot with polling
 const telegramBot = new TelegramBot(telegram.botToken, { polling: true })
-telegramBot.on('inline_query', getInlineHandler(telegramBot))
-setupStickerBan(telegramBot)
-setupXVideosDownload(telegramBot)
-setupUnpinChannelMessages(telegramBot)
+telegramBot.on('inline_query', getInlineHandler(telegramBot));
+
+(async () => {
+  setupStickerBan(telegramBot)
+  setupUnpinChannelMessages(telegramBot)
+  await setupXVideosDownload(telegramBot)
+  await setupYouTubeDownload(telegramBot)
+})()
 
 // Storage for pending VK messages sent from Telegram
 const pendingVkMessages = new Map()
