@@ -1,6 +1,6 @@
 FROM node:22-bookworm
 RUN apt-get update &&\
-  apt-get install -y ffmpeg python3 python3-requests &&\
+  apt-get install -y ffmpeg python3 python3-requests libaom3 &&\
   rm -rf /var/lib/{apt,dpkg,cache,log}/
 WORKDIR /usr/src/app
 COPY package*.json ./
