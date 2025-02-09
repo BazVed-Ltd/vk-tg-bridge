@@ -23,11 +23,14 @@ export default async function setupYouTubeDownload(telegramBot) {
 
   // Получение полной JSON-информации по видео
   async function getVideoInfo(url) {
-    const result = await ytDlpWrap.execPromise([
+    const args = [
       url,
-      '--dump-single-json',
-      ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : [])
-    ])
+      '--dump-single-json'
+    ]
+    if (process.env.X_PROXY) {
+      args.push('--proxy', process.env.X_PROXY)
+    }
+    const result = await ytDlpWrap.execPromise(args)
     return JSON.parse(result)
   }
 
@@ -68,12 +71,12 @@ export default async function setupYouTubeDownload(telegramBot) {
         // Форсируем перекодировку:
         // 1. --recode-video mp4: перекодировать видео в контейнер mp4.
         // 2. --postprocessor-args: передаём ffmpeg аргументы для:
-        //    - принудительного кодирования с libaom-av1,
-        //    - перемещения moov-атома в начало файла (для потоковой загрузки),
-        //    - включения многопоточности (-threads 0) и ускоренного кодирования (-cpu-used 4).
+        //    - кодирования с libaom-av1,
+        //    - перемещения moov-атома в начало файла,
+        //    - использования всех ядер (-threads 0) и ускоренного кодирования (-cpu-used 4).
         const extraOptions = [
           '--recode-video', 'mp4',
-          '--postprocessor-args', '-c:v libaom-av1 -movflags +faststart -threads 0 -cpu-used 4'
+          '--postprocessor-args', 'ffmpeg:-c:v libaom-av1 -movflags +faststart -threads 0 -cpu-used 4'
         ]
 
         // Создаём временную директорию для загрузки
@@ -87,10 +90,12 @@ export default async function setupYouTubeDownload(telegramBot) {
           link,
           '-f', format,
           '--no-playlist',
-          '-o', outPath,
-          ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : []),
-          ...extraOptions
+          '-o', outPath
         ]
+        if (process.env.X_PROXY) {
+          ytDlpOptions.push('--proxy', process.env.X_PROXY)
+        }
+        ytDlpOptions.push(...extraOptions)
 
         const ytDlpEmitter = ytDlpWrap.exec(ytDlpOptions)
 
@@ -124,8 +129,10 @@ export default async function setupYouTubeDownload(telegramBot) {
               }
 
               const finalPath = path.join(tempDir.path, downloadedFile)
+              // Передаём опцию supports_streaming, чтобы Telegram понимал, что файл готов к потоковой загрузке
               await telegramBot.sendVideo(chatId, finalPath, {
-                reply_to_message_id: msg.message_id
+                reply_to_message_id: msg.message_id,
+                supports_streaming: true
               })
 
               // Удаляем временные файлы
