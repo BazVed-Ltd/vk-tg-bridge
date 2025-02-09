@@ -1,7 +1,7 @@
 import fs from 'fs/promises'
 import path from 'path'
+import tmp from 'tmp-promise'
 import ytDlpPkg from 'yt-dlp-wrap'
-import stream from 'stream'
 
 const YTDlpWrap = ytDlpPkg.default
 
@@ -21,7 +21,7 @@ export default async function setupYouTubeDownload(telegramBot) {
 
   const targetChatId = process.env.TELEGRAM_CHAT_ID
 
-  // Получение JSON-информации о видео
+  // Получение всей JSON-информации по видео
   async function getVideoInfo(url) {
     const result = await ytDlpWrap.execPromise([
       url,
@@ -38,7 +38,7 @@ export default async function setupYouTubeDownload(telegramBot) {
     const chatId = msg.chat.id
     const text = msg.text
 
-    // Поиск ссылок на youtube.com и youtu.be
+    // Ссылки на youtube.com и youtu.be
     const youtubeRegex = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s]+/g
     const links = text.match(youtubeRegex)
     if (!links) return
@@ -49,6 +49,7 @@ export default async function setupYouTubeDownload(telegramBot) {
         const info = await getVideoInfo(link)
         const duration = info.duration || 0
         if (duration > 1800) {
+          // Больше 30 минут — не скачиваем
           await telegramBot.sendMessage(
             chatId,
             'Видео длиннее 30 минут, скачивание не допускается.',
@@ -57,59 +58,86 @@ export default async function setupYouTubeDownload(telegramBot) {
           continue
         }
 
-        // Выбираем формат в зависимости от длительности видео
+        // Выбираем формат в зависимости от продолжительности
         let format = ''
         if (duration <= 180) {
+          // до 3 минут => 720p
           format = 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]'
         } else if (duration <= 600) {
+          // до 10 минут => 480p
           format = 'bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]'
         } else {
+          // до 30 минут => 240p
           format = 'bestvideo[ext=mp4][height<=240]+bestaudio[ext=m4a]/best[ext=mp4][height<=240]'
         }
 
-        // Опции для yt-dlp с выводом потока (stdout)
+        // Создаём временную директорию
+        const tempDir = await tmp.dir({ prefix: 'youtube-' })
+
+        // Формируем путь для итогового файла:
+        // Имя файла = ID видео, расширение определяется yt-dlp (с использованием %(ext)s)
+        const outPath = path.join(tempDir.path, `${info.id}.%(ext)s`)
+
+        // Параметры для yt-dlp с дополнительными флагами для потокового воспроизведения
         const ytDlpOptions = [
           link,
           '-f', format,
           '--no-playlist',
-          '-o', '-', // вывод в stdout
+          '-o', outPath,
+          '--hls-use-mpegts',
+          '--postprocessor-args', 'ffmpeg:-movflags +faststart',
           ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : [])
         ]
 
-        // Используем execStream вместо exec для получения Readable Stream
-        const videoStream = ytDlpWrap.execStream(ytDlpOptions)
+        const ytDlpEmitter = ytDlpWrap.exec(ytDlpOptions)
 
-        videoStream.on('progress', (progress) => {
-          console.log(
-            `Progress: ${progress.percent}%`,
-            `Total Size: ${progress.totalSize}`,
-            `Speed: ${progress.currentSpeed}`,
-            `ETA: ${progress.eta}`
-          )
-        })
+        ytDlpEmitter
+          .on('progress', (progress) => {
+            console.log(
+              `Progress: ${progress.percent}%`,
+              `Total Size: ${progress.totalSize}`,
+              `Speed: ${progress.currentSpeed}`,
+              `ETA: ${progress.eta}`
+            )
+          })
+          .on('ytDlpEvent', (eventType, eventData) => {
+            console.log('yt-dlp event:', eventType, eventData)
+          })
+          .on('error', async (error) => {
+            console.error('yt-dlp error:', error)
+            await telegramBot.sendMessage(
+              chatId,
+              'Ошибка при скачивании видео.',
+              { reply_to_message_id: msg.message_id }
+            )
+          })
+          .on('close', async () => {
+            try {
+              // После завершения скачивания ищем файл с нужным расширением
+              const files = await fs.readdir(tempDir.path)
+              const downloadedFile = files.find((file) => file.startsWith(info.id + '.'))
+              if (!downloadedFile) {
+                throw new Error('Файл не найден после скачивания.')
+              }
 
-        videoStream.on('ytDlpEvent', (eventType, eventData) => {
-          console.log('yt-dlp event:', eventType, eventData)
-        })
+              const finalPath = path.join(tempDir.path, downloadedFile)
+              // Отправляем видео в Telegram с указанием, что оно поддерживает потоковое воспроизведение
+              await telegramBot.sendVideo(chatId, finalPath, {
+                reply_to_message_id: msg.message_id,
+                supports_streaming: true
+              })
 
-        videoStream.on('error', async (error) => {
-          console.error('yt-dlp error:', error)
-          await telegramBot.sendMessage(
-            chatId,
-            'Ошибка при скачивании видео.',
-            { reply_to_message_id: msg.message_id }
-          )
-        })
-
-        // Отправляем видео напрямую, передавая полученный поток
-        await telegramBot.sendVideo(chatId, videoStream, {
-          filename: `${info.id}.mp4`,
-          reply_to_message_id: msg.message_id
-        })
-
-        videoStream.on('close', () => {
-          console.log('yt-dlp завершил передачу потока.')
-        })
+              // Удаляем временные файлы
+              await fs.rm(tempDir.path, { recursive: true, force: true })
+            } catch (err) {
+              console.error('Error sending video:', err)
+              await telegramBot.sendMessage(
+                chatId,
+                'Ошибка при отправке видео.',
+                { reply_to_message_id: msg.message_id }
+              )
+            }
+          })
       } catch (err) {
         console.error('Error initializing video download:', err)
         await telegramBot.sendMessage(
