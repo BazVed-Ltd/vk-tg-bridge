@@ -21,7 +21,7 @@ export default async function setupYouTubeDownload(telegramBot) {
 
   const targetChatId = process.env.TELEGRAM_CHAT_ID
 
-  // Получение JSON-информации по видео
+  // Получение полной JSON-информации по видео
   async function getVideoInfo(url) {
     const result = await ytDlpWrap.execPromise([
       url,
@@ -57,34 +57,27 @@ export default async function setupYouTubeDownload(telegramBot) {
           continue
         }
 
-        // Выбираем максимальную высоту в зависимости от длительности
+        // Определяем максимальное разрешение:
+        // до 3 минут — 720p, до 10 минут — 480p, иначе — 240p.
         const maxHeight = duration <= 180 ? 720 : (duration <= 600 ? 480 : 240)
 
-        // Проверяем, доступен ли вариант с AV1 (без учета контейнера)
-        const hasAv1 = info.formats && info.formats.some(fmt => {
-          return fmt.vcodec && fmt.vcodec.includes('av01') &&
-                 fmt.height && fmt.height <= maxHeight
-        })
+        // Выбираем лучший видео-формат в рамках нужного разрешения.
+        // Обратите внимание: мы не фильтруем по кодеку, так как в любом случае будем выполнять перекодировку.
+        const format = `bestvideo[height<=${maxHeight}]+bestaudio[ext=m4a]/best[height<=${maxHeight}]`
 
-        let format = ''
-        let extraOptions = []
-        if (hasAv1) {
-          // Если AV1 есть, выбираем видео с AV1 (аудио — с расширением m4a, если доступно)
-          // Затем с помощью --remux-video mp4 гарантируем итоговый контейнер mp4.
-          format = `bestvideo[vcodec=av01][height<=${maxHeight}]+bestaudio[ext=m4a]/best[vcodec=av01][height<=${maxHeight}]`
-          extraOptions.push('--remux-video', 'mp4')
-        } else {
-          // Если вариантов с AV1 нет, выбираем лучший доступный вариант в рамках высоты,
-          // а затем выполняем перекодировку в AV1/mp4.
-          format = `bestvideo[height<=${maxHeight}]+bestaudio[ext=m4a]/best[height<=${maxHeight}][ext=mp4]`
-          extraOptions.push('--recode-video', 'mp4', '--postprocessor-args', '-c:v libaom-av1')
-        }
+        // Форсируем перекодировку:
+        // 1. --recode-video mp4: перекодировать видео в контейнер mp4.
+        // 2. --postprocessor-args: передаем ffmpeg аргументы для принудительного кодирования видео с libaom-av1
+        //    и добавляем -movflags +faststart для обеспечения потоковой загрузки.
+        const extraOptions = [
+          '--recode-video', 'mp4',
+          '--postprocessor-args', '-c:v libaom-av1 -movflags +faststart'
+        ]
 
-        // Создаём временную директорию
+        // Создаём временную директорию для загрузки
         const tempDir = await tmp.dir({ prefix: 'youtube-' })
 
-        // Формируем путь для итогового файла:
-        // Имя файла = ID видео, а расширение подставится автоматически (%(ext)s)
+        // Формируем путь для итогового файла (имя файла = ID видео, расширение подставится автоматически)
         const outPath = path.join(tempDir.path, `${info.id}.%(ext)s`)
 
         // Собираем параметры для yt-dlp
