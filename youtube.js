@@ -21,7 +21,7 @@ export default async function setupYouTubeDownload(telegramBot) {
 
   const targetChatId = process.env.TELEGRAM_CHAT_ID
 
-  // Функция для получения JSON-информации о видео
+  // Получение JSON-информации о видео
   async function getVideoInfo(url) {
     const result = await ytDlpWrap.execPromise([
       url,
@@ -38,7 +38,7 @@ export default async function setupYouTubeDownload(telegramBot) {
     const chatId = msg.chat.id
     const text = msg.text
 
-    // Ищем ссылки на youtube.com и youtu.be
+    // Поиск ссылок на youtube.com и youtu.be
     const youtubeRegex = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s]+/g
     const links = text.match(youtubeRegex)
     if (!links) return
@@ -49,7 +49,6 @@ export default async function setupYouTubeDownload(telegramBot) {
         const info = await getVideoInfo(link)
         const duration = info.duration || 0
         if (duration > 1800) {
-          // Видео длиннее 30 минут – скачивание не допускается
           await telegramBot.sendMessage(
             chatId,
             'Видео длиннее 30 минут, скачивание не допускается.',
@@ -58,20 +57,17 @@ export default async function setupYouTubeDownload(telegramBot) {
           continue
         }
 
-        // Выбираем формат в зависимости от продолжительности
+        // Выбираем формат в зависимости от длительности видео
         let format = ''
         if (duration <= 180) {
-          // до 3 минут – 720p
           format = 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]'
         } else if (duration <= 600) {
-          // до 10 минут – 480p
           format = 'bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]'
         } else {
-          // до 30 минут – 240p
           format = 'bestvideo[ext=mp4][height<=240]+bestaudio[ext=m4a]/best[ext=mp4][height<=240]'
         }
 
-        // Опции для yt-dlp с выводом в stdout для потоковой передачи
+        // Опции для yt-dlp с выводом потока (stdout)
         const ytDlpOptions = [
           link,
           '-f', format,
@@ -80,15 +76,10 @@ export default async function setupYouTubeDownload(telegramBot) {
           ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : [])
         ]
 
-        // Запускаем процесс скачивания с помощью yt-dlp
-        const ytDlpEmitter = ytDlpWrap.exec(ytDlpOptions)
+        // Используем execStream вместо exec для получения Readable Stream
+        const videoStream = ytDlpWrap.execStream(ytDlpOptions)
 
-        // Создаём PassThrough-стрим, в который будем передавать потоковые данные
-        const { PassThrough } = stream
-        const videoStream = new PassThrough()
-        ytDlpEmitter.stdout.pipe(videoStream)
-
-        ytDlpEmitter.on('progress', (progress) => {
+        videoStream.on('progress', (progress) => {
           console.log(
             `Progress: ${progress.percent}%`,
             `Total Size: ${progress.totalSize}`,
@@ -97,11 +88,11 @@ export default async function setupYouTubeDownload(telegramBot) {
           )
         })
 
-        ytDlpEmitter.on('ytDlpEvent', (eventType, eventData) => {
+        videoStream.on('ytDlpEvent', (eventType, eventData) => {
           console.log('yt-dlp event:', eventType, eventData)
         })
 
-        ytDlpEmitter.on('error', async (error) => {
+        videoStream.on('error', async (error) => {
           console.error('yt-dlp error:', error)
           await telegramBot.sendMessage(
             chatId,
@@ -110,14 +101,14 @@ export default async function setupYouTubeDownload(telegramBot) {
           )
         })
 
-        // Отправляем видео, используя поток. Передаём имя файла, чтобы Telegram определил тип файла.
+        // Отправляем видео напрямую, передавая полученный поток
         await telegramBot.sendVideo(chatId, videoStream, {
           filename: `${info.id}.mp4`,
           reply_to_message_id: msg.message_id
         })
 
-        ytDlpEmitter.on('close', () => {
-          console.log('yt-dlp завершил потоковую передачу.')
+        videoStream.on('close', () => {
+          console.log('yt-dlp завершил передачу потока.')
         })
       } catch (err) {
         console.error('Error initializing video download:', err)
