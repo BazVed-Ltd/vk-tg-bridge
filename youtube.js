@@ -19,10 +19,9 @@ export default async function setupYouTubeDownload(telegramBot) {
   await ensureYtDlpDownloaded()
   const ytDlpWrap = new YTDlpWrap(ytDlpBinaryPath)
 
-  const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID
   const targetChatId = process.env.TELEGRAM_CHAT_ID
 
-  // Получение всей JSON-информации по видео
+  // Получение JSON-информации по видео
   async function getVideoInfo(url) {
     const result = await ytDlpWrap.execPromise([
       url,
@@ -39,7 +38,7 @@ export default async function setupYouTubeDownload(telegramBot) {
     const chatId = msg.chat.id
     const text = msg.text
 
-    // Ссылки на youtube.com и youtu.be
+    // Поиск ссылок на youtube.com и youtu.be
     const youtubeRegex = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s]+/g
     const links = text.match(youtubeRegex)
     if (!links) return
@@ -50,7 +49,6 @@ export default async function setupYouTubeDownload(telegramBot) {
         const info = await getVideoInfo(link)
         const duration = info.duration || 0
         if (duration > 1800) {
-          // Больше 30 минут — не скачиваем
           await telegramBot.sendMessage(
             chatId,
             'Видео длиннее 30 минут, скачивание не допускается.',
@@ -59,41 +57,45 @@ export default async function setupYouTubeDownload(telegramBot) {
           continue
         }
 
-        // Определяем ограничение по высоте в зависимости от длительности
-        const resolutionCap = duration <= 180 ? 720 : duration <= 600 ? 480 : 240
+        // Выбираем максимальную высоту в зависимости от длительности
+        const maxHeight = duration <= 180 ? 720 : (duration <= 600 ? 480 : 240)
 
-        // Проверяем, доступен ли AV1 среди форматов видео
-        const hasAV1 = info.formats.some(f => f.vcodec && f.vcodec.includes('av01'))
+        // Проверяем, доступен ли вариант с AV1 (без учета контейнера)
+        const hasAv1 = info.formats && info.formats.some(fmt => {
+          return fmt.vcodec && fmt.vcodec.includes('av01') &&
+                 fmt.height && fmt.height <= maxHeight
+        })
 
-        let format
-        if (hasAV1) {
-          // Если AV1 доступен, скачиваем AV1 напрямую с контейнером mp4
-          format = `bestvideo[vcodec=av01][ext=mp4][height<=${resolutionCap}]+bestaudio[ext=m4a]/best[vcodec=av01][ext=mp4][height<=${resolutionCap}]`
+        let format = ''
+        let extraOptions = []
+        if (hasAv1) {
+          // Если AV1 есть, выбираем видео с AV1 (аудио — с расширением m4a, если доступно)
+          // Затем с помощью --remux-video mp4 гарантируем итоговый контейнер mp4.
+          format = `bestvideo[vcodec=av01][height<=${maxHeight}]+bestaudio[ext=m4a]/best[vcodec=av01][height<=${maxHeight}]`
+          extraOptions.push('--remux-video', 'mp4')
         } else {
-          // Если AV1 недоступен, скачиваем в обычном формате, а потом конвертируем в AV1
-          format = `bestvideo[ext=mp4][height<=${resolutionCap}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${resolutionCap}]`
+          // Если вариантов с AV1 нет, выбираем лучший доступный вариант в рамках высоты,
+          // а затем выполняем перекодировку в AV1/mp4.
+          format = `bestvideo[height<=${maxHeight}]+bestaudio[ext=m4a]/best[height<=${maxHeight}][ext=mp4]`
+          extraOptions.push('--recode-video', 'mp4', '--postprocessor-args', '-c:v libaom-av1')
         }
 
         // Создаём временную директорию
         const tempDir = await tmp.dir({ prefix: 'youtube-' })
 
         // Формируем путь для итогового файла:
-        // Имя файла = ID видео, расширение определяется yt-dlp (с помощью %(ext)s)
+        // Имя файла = ID видео, а расширение подставится автоматически (%(ext)s)
         const outPath = path.join(tempDir.path, `${info.id}.%(ext)s`)
 
-        // Параметры для yt-dlp
+        // Собираем параметры для yt-dlp
         const ytDlpOptions = [
           link,
           '-f', format,
           '--no-playlist',
           '-o', outPath,
-          ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : [])
+          ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : []),
+          ...extraOptions
         ]
-
-        // Если формат AV1 недоступен, добавляем аргументы для конвертации в AV1 с помощью ffmpeg
-        if (!hasAV1) {
-          ytDlpOptions.push('--postprocessor-args', '-c:v libaom-av1 -crf 30 -b:v 0')
-        }
 
         const ytDlpEmitter = ytDlpWrap.exec(ytDlpOptions)
 
