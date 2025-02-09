@@ -1,13 +1,14 @@
 import fs from 'fs/promises'
+import path from 'path'
+import tmp from 'tmp-promise'
 import ytDlpPkg from 'yt-dlp-wrap'
-import { tmpName } from 'tmp-promise'
 
 const YTDlpWrap = ytDlpPkg.default
 
-export default async function setupYouTubeDownload (telegramBot) {
+export default async function setupYouTubeDownload(telegramBot) {
   const ytDlpBinaryPath = './yt-dlp'
 
-  async function ensureYtDlpDownloaded () {
+  async function ensureYtDlpDownloaded() {
     try {
       await fs.access(ytDlpBinaryPath)
     } catch (err) {
@@ -17,77 +18,82 @@ export default async function setupYouTubeDownload (telegramBot) {
 
   await ensureYtDlpDownloaded()
   const ytDlpWrap = new YTDlpWrap(ytDlpBinaryPath)
+
+  const adminChatId = process.env.TELEGRAM_ADMIN_CHAT_ID
   const targetChatId = process.env.TELEGRAM_CHAT_ID
 
-  // Helper to get video duration (in seconds)
-  async function getVideoDuration (url) {
-    try {
-      // --dump-single-json outputs one JSON line with all info
-      const result = await ytDlpWrap.execPromise([
-        url,
-        '--dump-single-json',
-        // If you need a proxy
-        ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : [])
-      ])
-      const info = JSON.parse(result)
-      return info.duration || 0
-    } catch (err) {
-      console.error('Error fetching video info:', err)
-      throw err
-    }
+  // Получение всей JSON-информации по видео
+  async function getVideoInfo(url) {
+    const result = await ytDlpWrap.execPromise([
+      url,
+      '--dump-single-json',
+      ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : [])
+    ])
+    return JSON.parse(result)
   }
 
   telegramBot.on('message', async (msg) => {
-    // Only handle messages in the targetChatId
     if (String(msg.chat.id) !== targetChatId) return
     if (!msg.text) return
 
     const chatId = msg.chat.id
     const text = msg.text
 
-    // Match youtube.com or youtu.be links
+    // Ссылки на youtube.com и youtu.be
     const youtubeRegex = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s]+/g
     const links = text.match(youtubeRegex)
     if (!links) return
 
     for (const link of links) {
       try {
-        const duration = await getVideoDuration(link)
+        // Получаем информацию о видео
+        const info = await getVideoInfo(link)
+        const duration = info.duration || 0
         if (duration > 1800) {
-          // Longer than 30 minutes
+          // Больше 30 минут — не скачиваем
           await telegramBot.sendMessage(
             chatId,
-            'Видео длиннее 30 минут',
+            'Видео длиннее 30 минут, скачивание не допускается.',
             { reply_to_message_id: msg.message_id }
           )
           continue
         }
 
-        // Choose format based on duration
-        let format = ''
-        if (duration <= 180) {
-          // up to 3 min => 720p
-          format = 'bestvideo[height<=720]+bestaudio/best[height<=720]'
-        } else if (duration <= 600) {
-          // up to 10 min => 480p
-          format = 'bestvideo[height<=480]+bestaudio/best[height<=480]'
+        // Определяем ограничение по высоте в зависимости от длительности
+        const resolutionCap = duration <= 180 ? 720 : duration <= 600 ? 480 : 240
+
+        // Проверяем, доступен ли AV1 среди форматов видео
+        const hasAV1 = info.formats.some(f => f.vcodec && f.vcodec.includes('av01'))
+
+        let format
+        if (hasAV1) {
+          // Если AV1 доступен, скачиваем AV1 напрямую с контейнером mp4
+          format = `bestvideo[vcodec=av01][ext=mp4][height<=${resolutionCap}]+bestaudio[ext=m4a]/best[vcodec=av01][ext=mp4][height<=${resolutionCap}]`
         } else {
-          // up to 30 min => 240p
-          format = 'bestvideo[height<=240]+bestaudio/best[height<=240]'
+          // Если AV1 недоступен, скачиваем в обычном формате, а потом конвертируем в AV1
+          format = `bestvideo[ext=mp4][height<=${resolutionCap}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${resolutionCap}]`
         }
 
-        // Build yt-dlp options
+        // Создаём временную директорию
+        const tempDir = await tmp.dir({ prefix: 'youtube-' })
+
+        // Формируем путь для итогового файла:
+        // Имя файла = ID видео, расширение определяется yt-dlp (с помощью %(ext)s)
+        const outPath = path.join(tempDir.path, `${info.id}.%(ext)s`)
+
+        // Параметры для yt-dlp
         const ytDlpOptions = [
           link,
-          '-f',
-          format,
+          '-f', format,
           '--no-playlist',
+          '-o', outPath,
           ...(process.env.X_PROXY ? ['--proxy', process.env.X_PROXY] : [])
         ]
 
-        // Generate a temporary file path for the output
-        const tempFilePath = await tmpName({ prefix: 'video-', postfix: '.mp4' })
-        ytDlpOptions.push('-o', tempFilePath)
+        // Если формат AV1 недоступен, добавляем аргументы для конвертации в AV1 с помощью ffmpeg
+        if (!hasAV1) {
+          ytDlpOptions.push('--postprocessor-args', '-c:v libaom-av1 -crf 30 -b:v 0')
+        }
 
         const ytDlpEmitter = ytDlpWrap.exec(ytDlpOptions)
 
@@ -103,21 +109,30 @@ export default async function setupYouTubeDownload (telegramBot) {
           .on('ytDlpEvent', (eventType, eventData) => {
             console.log('yt-dlp event:', eventType, eventData)
           })
-          .on('error', (error) => {
+          .on('error', async (error) => {
             console.error('yt-dlp error:', error)
-            telegramBot.sendMessage(
+            await telegramBot.sendMessage(
               chatId,
               'Ошибка при скачивании видео.',
               { reply_to_message_id: msg.message_id }
             )
           })
           .on('close', async () => {
-            console.log('Download completed:', tempFilePath)
             try {
-              await telegramBot.sendVideo(chatId, tempFilePath, {
+              // После завершения скачивания найдём файл (с нужным расширением)
+              const files = await fs.readdir(tempDir.path)
+              const downloadedFile = files.find((file) => file.startsWith(info.id + '.'))
+              if (!downloadedFile) {
+                throw new Error('Файл не найден после скачивания.')
+              }
+
+              const finalPath = path.join(tempDir.path, downloadedFile)
+              await telegramBot.sendVideo(chatId, finalPath, {
                 reply_to_message_id: msg.message_id
               })
-              await fs.unlink(tempFilePath)
+
+              // Удаляем временные файлы
+              await fs.rm(tempDir.path, { recursive: true, force: true })
             } catch (err) {
               console.error('Error sending video:', err)
               await telegramBot.sendMessage(
