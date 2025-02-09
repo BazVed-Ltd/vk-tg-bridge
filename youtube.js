@@ -65,18 +65,18 @@ export default async function setupYouTubeDownload(telegramBot) {
         const maxHeight = duration <= 180 ? 720 : (duration <= 600 ? 480 : 240)
 
         // Выбираем лучший видео-формат в рамках нужного разрешения.
-        // Независимо от исходного кодека, мы будем перекодировать видео.
+        // Здесь не фильтруем по кодеку, так как в любом случае будем выполнять перекодировку.
         const format = `bestvideo[height<=${maxHeight}]+bestaudio[ext=m4a]/best[height<=${maxHeight}]`
 
         // Форсируем перекодировку:
         // 1. --recode-video mp4: перекодировать видео в контейнер mp4.
         // 2. --postprocessor-args: передаём ffmpeg аргументы для:
-        //    - кодирования с libaom-av1,
-        //    - перемещения moov-атома в начало файла,
-        //    - использования всех ядер (-threads 0) и ускоренного кодирования (-cpu-used 4).
+        //    - кодирования с libvpx-vp9,
+        //    - перемещения moov-атома в начало файла (для потоковой загрузки),
+        //    - использования всех доступных ядер (-threads 0) и ускоренного кодирования (-cpu-used 4).
         const extraOptions = [
           '--recode-video', 'mp4',
-          '--postprocessor-args', 'ffmpeg:-c:v libaom-av1 -movflags +faststart -threads 0 -cpu-used 4'
+          '--postprocessor-args', 'ffmpeg:-c:v libvpx-vp9 -movflags +faststart -threads 0 -cpu-used 4'
         ]
 
         // Создаём временную директорию для загрузки
