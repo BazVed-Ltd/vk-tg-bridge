@@ -30,7 +30,7 @@ telegramBot.on('inline_query', getInlineHandler(telegramBot));
   setupStickerBan(telegramBot)
   setupUnpinChannelMessages(telegramBot)
   await setupXVideosDownload(telegramBot)
-  await setupYouTubeDownload(telegramBot)
+  //await setupYouTubeDownload(telegramBot)
 })()
 
 // Storage for pending VK messages sent from Telegram
