@@ -40,8 +40,9 @@ export default async function setupYouTubeDownload(telegramBot) {
 
     // Ссылки на youtube.com и youtu.be
     const youtubeRegex = /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s]+/g
-    const links = text.match(youtubeRegex)
-    if (!links) return
+    const _links = text.match(youtubeRegex)
+    if (!_links) return
+    const links = [...new Set(_links)]
 
     for (const link of links) {
       try {
